@@ -78,10 +78,10 @@ BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
 #  - Owner /dkff se kisi hard-coded admin ko DISABLE/REMOVE kar sakta hai.
 #    Isse source/config ID delete nahi hoti; DB me revoke flag save hota hai.
 # ════════════════════════════════════════════════════════════════════════
-OWNER_ID = int((os.getenv("OWNER_ID") or "8753914631").strip() or 0)
+OWNER_ID = int((os.getenv("OWNER_ID") or "0").strip() or 0)
 
 HARDCODED_ADMIN_IDS = {
-    int(x) for x in (os.getenv("HARDCODED_ADMIN_IDS") or "8753914631").replace(" ", "").split(",")
+    int(x) for x in (os.getenv("HARDCODED_ADMIN_IDS") or "").replace(" ", "").split(",")
     if x.isdigit()
 }
 # Backward compatibility: purana ADMIN_IDS bhi hard-coded/config admins maana jayega.
@@ -162,6 +162,7 @@ DEFAULT_SETTINGS = {
     "start_photo": "",
     "gc_prefix": "EARNINGZONE",       # gift code prefix
     "premium_btn_icons": "1",         # buttons par premium emoji icon (Bot API 9.4+)
+    "auto_backup": "1",               # 1 = automatic DB backup ON, 0 = OFF (manual backup hamesha chalta hai)
     "user_button_config": "{}",       # legacy key; migrated automatically
     "button_config": "{}",            # all buttons: replacement emoji/text/style
     "button_registry": "{}",          # discovered static and dynamic button definitions
@@ -1272,6 +1273,10 @@ def maintenance_on() -> bool:
     return gi("maintenance", 0) == 1
 
 
+def auto_backup_on() -> bool:
+    return gi("auto_backup", 1) == 1
+
+
 _maint_notice_ts: dict = {}      # uid -> last maintenance notice (anti-spam)
 MAINT_NOTICE_COOLDOWN = 60       # seconds
 
@@ -1985,6 +1990,7 @@ async def a_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🚪 Leave Penalty : <b>{'ON ✅' if gi('leave_penalty', 1) else 'OFF ❌'}</b>\n"
         f"🔔 Notify Referrer : <b>{'ON ✅' if gi('notify_referrer', 1) else 'OFF ❌'}</b>\n"
         f"🛠 Maintenance : <b>{'ON ⚠️ (sab users blocked)' if maintenance_on() else 'OFF ✅'}</b>\n"
+        f"🔄 Auto Backup : <b>{'ON ✅' if auto_backup_on() else 'OFF ❌'}</b>\n"
         f"🗒 Log Channel : <b>{esc(gs('log_channel')) or '—'}</b>\n"
         f"🖼 Start Photo : <b>{'SET ✅' if gs('start_photo') else '—'}</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
@@ -2007,6 +2013,8 @@ async def a_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
          ikb("😔 Oᴜᴛ-ᴏғ-Sᴛᴏᴄᴋ Tᴇxᴛ", callback_data="a_set_oos")],
         [ikb("🛠 Mᴀɪɴᴛᴇɴᴀɴᴄᴇ Tᴇxᴛ", callback_data="a_set_maint"),
          ikb("👁 Pʀᴇᴠɪᴇᴡ Tᴇxᴛs", callback_data="a_set_preview")],
+        [ikb(f"🔄 Aᴜᴛᴏ Bᴀᴄᴋᴜᴘ : {'ON' if auto_backup_on() else 'OFF'}",
+                              callback_data="a_t_autobk_s")],
         [ikb(f"💎 Pʀᴇᴍɪᴜᴍ Bᴜᴛᴛᴏɴ Iᴄᴏɴs : {'ON' if gi('premium_btn_icons', 1) else 'OFF'}",
                               callback_data="a_t_pbtn")],
         [ikb("🎨 Usᴇʀ Bᴜᴛᴛᴏɴ Cᴜsᴛᴏᴍɪᴢᴇʀ", callback_data="a_btncfg_pg:0")],
@@ -2646,12 +2654,14 @@ async def a_tools(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━━━\n"
         "• Users CSV export\n• Agent numbers export\n• Full database backup\n"
         "• <b>DB Restore</b> : backup wali <code>.db</code> file yahan bhej dijiye\n"
-        "• Join-cache clear (force re-check)\n• Waitlist ko manually notify"
+        "• Join-cache clear (force re-check)\n• Waitlist ko manually notify\n\n"
+        f"🔄 Auto Backup : <b>{'ON ✅' if auto_backup_on() else 'OFF ❌ (sirf manual backup)'}</b>"
     )
     kb = InlineKeyboardMarkup([
         [ikb("📤 Usᴇʀs CSV", callback_data="a_exp_users"),
          ikb("📤 Nᴜᴍʙᴇʀs TXT", callback_data="a_exp_codes")],
         [ikb("💾 DB Bᴀᴄᴋᴜᴘ", callback_data="a_backup")],
+        [ikb(f"🔄 Aᴜᴛᴏ Bᴀᴄᴋᴜᴘ : {'ON' if auto_backup_on() else 'OFF'}", callback_data="a_t_autobk")],
         [ikb("♻️ Cʟᴇᴀʀ Jᴏɪɴ Cᴀᴄʜᴇ", callback_data="a_clr_cache"),
          ikb("🔔 Nᴏᴛɪғʏ Wᴀɪᴛʟɪsᴛ", callback_data="a_wl_notify")],
         [ikb("⬅️ Bᴀᴄᴋ", callback_data="a_home")],
@@ -3055,6 +3065,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "a_t_notify":
         ss("notify_referrer", 0 if gi("notify_referrer", 1) else 1)
         return await a_settings(update, context)
+    if data in ("a_t_autobk", "a_t_autobk_s"):
+        ss("auto_backup", 0 if auto_backup_on() else 1)
+        if data == "a_t_autobk_s":
+            return await a_settings(update, context)
+        return await a_tools(update, context)
     if data == "a_t_pbtn":
         ss("premium_btn_icons", 0 if gi("premium_btn_icons", 1) else 1)
         return await a_settings(update, context)
@@ -4095,6 +4110,9 @@ async def backup_loop(bot) -> None:
     while True:
         await asyncio.sleep(5)
         try:
+            if not auto_backup_on():
+                last_run = time.time()      # OFF: kuch nahi bhejna; ON karte hi pending change ka backup chalega
+                continue
             dirty = _backup_dirty_at and (time.time() - _backup_dirty_at) >= 20
             if dirty or (time.time() - last_run) >= BACKUP_EVERY:
                 await backup_now(bot, force=bool(dirty))
@@ -4112,6 +4130,9 @@ async def post_stop(app: Application):
         task = app.bot_data.get(key)
         if task:
             task.cancel()
+    if not auto_backup_on():
+        log.info("Auto-backup OFF — final backup skip.")
+        return
     try:
         await asyncio.wait_for(backup_now(app.bot, force=True), timeout=25)
     except Exception as e:  # noqa: BLE001
