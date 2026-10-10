@@ -4184,9 +4184,14 @@ async def post_init(app: Application):
 
 def main():
     if not BOT_TOKEN:
-        raise SystemExit("❌ BOT_TOKEN missing! Render → Environment me BOT_TOKEN daaliye.")
+        raise SystemExit("BOT_TOKEN is missing. Add it in Render > Environment.")
     if not OWNER_ID:
-        log.warning("⚠️ OWNER_ID set nahi hai — admin panel kaam nahi karega!")
+        raise SystemExit(
+            "OWNER_ID is missing. Add your numeric Telegram user ID in "
+            "Render > Environment; otherwise owner-only controls cannot work."
+        )
+    if OWNER_ID < 1:
+        raise SystemExit("OWNER_ID must be a positive numeric Telegram user ID.")
     start_health_server()
     start_keepalive()
     db_init()
@@ -4231,7 +4236,14 @@ def main():
     app.add_error_handler(on_error)
 
     log.info("Polling start… Developer: %s", DEV_NAME)
-    # drop_pending_updates=False: restart/sleep ke dauran aaye join-requests & join events miss na hon
+    log.warning(
+        "Deployment requirement: run exactly ONE active process/service for this BOT_TOKEN. "
+        "Telegram polling cannot be shared by multiple Render services, instances, or a local copy. "
+        "If a second process uses this token, Telegram returns getUpdates Conflict."
+    )
+    # Keep pending updates so join requests and membership events aren't discarded on restart.
+    # A getUpdates Conflict is an external duplicate-poller problem; Python code inside this
+    # process cannot terminate another Render service or a local process using the same token.
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=False)
 
 
